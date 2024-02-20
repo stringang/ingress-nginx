@@ -1,5 +1,6 @@
 {{- define "ingress-nginx.params" -}}
 - /nginx-ingress-controller
+- --
 {{- if .Values.defaultBackend.enabled }}
 - --default-backend-service=$(POD_NAMESPACE)/{{ include "ingress-nginx.defaultBackend.fullname" . }}
 {{- end }}

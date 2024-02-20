@@ -92,7 +92,7 @@ func (t *Queue) enqueue(obj interface{}, skippable bool) {
 	}
 	t.queue.Add(Element{
 		Key:       key,
-		Timestamp: ts,
+		Timestamp: ts, // event 添加 queue 时间戳
 	})
 }
 
@@ -108,6 +108,7 @@ func (t *Queue) defaultKeyFunc(obj interface{}) (interface{}, error) {
 // worker processes work in the queue through sync.
 func (t *Queue) worker() {
 	for {
+		// 从 queue 消费
 		key, quit := t.queue.Get()
 		if quit {
 			if !isClosed(t.workerDone) {
@@ -118,6 +119,7 @@ func (t *Queue) worker() {
 		ts := time.Now().UnixNano()
 
 		item := key.(Element)
+		// 对比上一次执行 sync func 时间
 		if item.Timestamp != 0 && t.lastSync > item.Timestamp {
 			klog.V(3).InfoS("skipping sync", "key", item.Key, "last", t.lastSync, "now", item.Timestamp)
 			t.queue.Forget(key)
@@ -126,6 +128,7 @@ func (t *Queue) worker() {
 		}
 
 		klog.V(3).InfoS("syncing", "key", item.Key)
+		// 执行 syncIngress
 		if err := t.sync(key); err != nil {
 			klog.ErrorS(err, "requeuing", "key", item.Key)
 			t.queue.AddRateLimited(Element{
@@ -133,8 +136,9 @@ func (t *Queue) worker() {
 				Timestamp: 0,
 			})
 		} else {
+			// 执行成功
 			t.queue.Forget(key)
-			t.lastSync = ts
+			t.lastSync = ts // 记录最新一次执行 sync func 时间
 		}
 
 		t.queue.Done(key)

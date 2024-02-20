@@ -116,6 +116,8 @@ controller:
   terminationGracePeriodSeconds: 0
   service:
     type: NodePort
+  admissionWebhooks:
+    enabled: false
 EOF
 
 cat <<EOF

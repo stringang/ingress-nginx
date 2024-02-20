@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"k8s.io/klog/v2"
 	"math/rand" // #nosec
 	"net/http"
 	"net/http/pprof"
@@ -40,8 +41,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	certutil "k8s.io/client-go/util/cert"
-	"k8s.io/klog/v2"
-
 	"k8s.io/ingress-nginx/internal/file"
 	"k8s.io/ingress-nginx/internal/ingress/controller"
 	"k8s.io/ingress-nginx/internal/ingress/metric"
@@ -67,17 +66,20 @@ func main() {
 		klog.Fatal(err)
 	}
 
+	// 创建 /etc/ingress-controller/ssl /etc/ingress-controller/auth 目录
 	err = file.CreateRequiredDirectories()
 	if err != nil {
 		klog.Fatal(err)
 	}
 
+	// 使用 client-go 创建 kubeClient(创建 apiServer 连接), 默认使用 serviceAccount token ca.crt 信息
 	kubeClient, err := createApiserverClient(conf.APIServerHost, conf.RootCAFile, conf.KubeConfigFile)
 	if err != nil {
 		handleFatalInitError(err)
 	}
 
 	if len(conf.DefaultService) > 0 {
+		// 检查 --default-backend-service 参数值状态
 		err := checkService(conf.DefaultService, kubeClient)
 		if err != nil {
 			klog.Fatal(err)
@@ -87,6 +89,7 @@ func main() {
 	}
 
 	if len(conf.PublishService) > 0 {
+		// 检查 --publish-service 参数值状态
 		err := checkService(conf.PublishService, kubeClient)
 		if err != nil {
 			klog.Fatal(err)
@@ -100,6 +103,7 @@ func main() {
 		}
 	}
 
+	// 创建 fake certificates
 	conf.FakeCertificate = ssl.GetFakeSSLCert()
 	klog.InfoS("SSL fake certificate created", "file", conf.FakeCertificate.PemFileName)
 
@@ -107,6 +111,7 @@ func main() {
 		klog.Fatalf("ingress-nginx requires Kubernetes v1.19.0 or higher")
 	}
 
+	// 获取集群中 ingressclasses 列表 i.e.: waf/nginx/public 运行多个 ingress-nginx controller
 	_, err = kubeClient.NetworkingV1().IngressClasses().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		if !errors.IsNotFound(err) {
@@ -118,6 +123,7 @@ func main() {
 	}
 	conf.Client = kubeClient
 
+	// 获取 ingress-nginx pod 信息
 	err = k8s.GetIngressPod(kubeClient)
 	if err != nil {
 		klog.Fatalf("Unexpected error obtaining ingress-nginx pod: %v", err)
@@ -146,6 +152,7 @@ func main() {
 		go registerProfiler()
 	}
 
+	// 创建 nginx controller 实例对象
 	ngx := controller.NewNGINXController(conf, mc)
 
 	mux := http.NewServeMux()
@@ -160,8 +167,10 @@ func main() {
 	}
 
 	go startHTTPServer(conf.HealthCheckHost, conf.ListenPorts.Health, mux)
+	// 启动 nginx controller goroutine
 	go ngx.Start()
 
+	// 处理 SIGTERM 信号
 	handleSigterm(ngx, conf.PostShutdownGracePeriod, func(code int) {
 		os.Exit(code)
 	})
@@ -197,6 +206,7 @@ func handleSigterm(ngx *controller.NGINXController, delay int, exit exiter) {
 // controller runs inside Kubernetes and fallback to the in-cluster config. If
 // the in-cluster config is missing or fails, we fallback to the default config.
 func createApiserverClient(apiserverHost, rootCAFile, kubeConfig string) (*kubernetes.Clientset, error) {
+	// 默认会获取 pod 挂载 ServiceAccounts 的 token 和 ca.crt 信息
 	cfg, err := clientcmd.BuildConfigFromFlags(apiserverHost, kubeConfig)
 	if err != nil {
 		return nil, err

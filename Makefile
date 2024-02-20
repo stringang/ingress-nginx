@@ -55,7 +55,8 @@ endif
 
 REGISTRY ?= gcr.io/k8s-staging-ingress-nginx
 
-BASE_IMAGE ?= k8s.gcr.io/ingress-nginx/nginx:cd6f88af3f976a180ed966dadf273473ae768dfa@sha256:18f91105e4099941d2efee71a8ec52c6ef7702d5f7e8214b7cb5f25cc10a0b41
+# 使用本地 nginx 镜像
+BASE_IMAGE ?= gcr.io/k8s-staging-ingress-nginx/nginx:0.0
 
 GOARCH=$(ARCH)
 
@@ -73,7 +74,7 @@ image: clean-image ## Build image for a particular arch.
 		--build-arg TARGETARCH="$(ARCH)" \
 		--build-arg COMMIT_SHA="$(COMMIT_SHA)" \
 		--build-arg BUILD_ID="$(BUILD_ID)" \
-		-t $(REGISTRY)/controller:$(TAG) rootfs
+		-t $(REGISTRY)/controller:$(TAG) rootfs -f rootfs/Dockerfile.debug
 
 .PHONY: image-chroot
 image-chroot: clean-chroot-image ## Build image for a particular arch.
@@ -101,14 +102,15 @@ clean-chroot-image: ## Removes local image
 
 .PHONY: build
 build:  ## Build ingress controller, debug tool and pre-stop hook.
-	@build/run-in-docker.sh \
-		PKG=$(PKG) \
-		ARCH=$(ARCH) \
-		COMMIT_SHA=$(COMMIT_SHA) \
-		REPO_INFO=$(REPO_INFO) \
-		TAG=$(TAG) \
-		GOBUILD_FLAGS=$(GOBUILD_FLAGS) \
-		build/build.sh
+#	@build/run-in-docker.sh \
+#		PKG=$(PKG) \
+#		ARCH=$(ARCH) \
+#		COMMIT_SHA=$(COMMIT_SHA) \
+#		REPO_INFO=$(REPO_INFO) \
+#		TAG=$(TAG) \
+#		GOBUILD_FLAGS=$(GOBUILD_FLAGS) \
+#		build/build.sh
+	echo "fake builld"
 
 .PHONY: build-plugin
 build-plugin:  ## Build ingress-nginx krew plugin.

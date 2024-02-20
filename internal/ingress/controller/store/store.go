@@ -156,6 +156,7 @@ func (e NotExistsError) Error() string {
 }
 
 // Run initiates the synchronization of the informers against the API server.
+// 运行 ingress-nginx informer
 func (i *Informer) Run(stopCh chan struct{}) {
 	go i.Secret.Run(stopCh)
 	go i.Endpoint.Run(stopCh)
@@ -251,6 +252,8 @@ func New(
 	deepInspector bool,
 	icConfig *ingressclass.IngressClassConfiguration) Storer {
 
+	// 内部使用 object store
+	// informer
 	store := &k8sStore{
 		informers:             &Informer{},
 		listers:               &Lister{},
@@ -324,6 +327,7 @@ func New(
 	store.informers.Ingress = infFactory.Networking().V1().Ingresses().Informer()
 	store.listers.Ingress.Store = store.informers.Ingress.GetStore()
 
+	// 运行多个 ingress-nginx controller
 	if !icConfig.IgnoreIngressClass {
 		store.informers.IngressClass = infFactory.Networking().V1().IngressClasses().Informer()
 		store.listers.IngressClass.Store = cache.NewStore(cache.MetaNamespaceKeyFunc)
@@ -412,6 +416,7 @@ func New(
 		}
 	}
 
+	// ingress informer event callback handler
 	ingEventHandler := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ing, _ := toIngress(obj)
@@ -441,10 +446,12 @@ func New(
 
 			recorder.Eventf(ing, corev1.EventTypeNormal, "Sync", "Scheduled for sync")
 
+			// 处理 event
 			store.syncIngress(ing)
 			store.updateSecretIngressMap(ing)
 			store.syncSecrets(ing)
 
+			// 向 channel 传递消息
 			updateCh.In() <- Event{
 				Type: CreateEvent,
 				Obj:  obj,
@@ -757,6 +764,7 @@ func New(
 		},
 	}
 
+	// service informer event handler
 	serviceHandler := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*corev1.Service)
@@ -791,6 +799,7 @@ func New(
 		},
 	}
 
+	// ingress informer event
 	store.informers.Ingress.AddEventHandler(ingEventHandler)
 	if !icConfig.IgnoreIngressClass {
 		store.informers.IngressClass.AddEventHandler(ingressClassEventHandler)
@@ -841,6 +850,7 @@ func (s *k8sStore) syncIngress(ing *networkingv1.Ingress) {
 	copyIng := &networkingv1.Ingress{}
 	ing.ObjectMeta.DeepCopyInto(&copyIng.ObjectMeta)
 
+	// annotation block list
 	if s.backendConfig.AnnotationValueWordBlocklist != "" {
 		if err := checkBadAnnotationValue(copyIng.Annotations, s.backendConfig.AnnotationValueWordBlocklist); err != nil {
 			klog.Warningf("skipping ingress %s: %s", key, err)
@@ -863,6 +873,7 @@ func (s *k8sStore) syncIngress(ing *networkingv1.Ingress) {
 		}
 	}
 
+	// 设置默认 pathtype 默认使用 prefix 匹配
 	k8s.SetDefaultNGINXPathType(copyIng)
 
 	err := s.listers.IngressWithAnnotation.Update(&ingress.Ingress{

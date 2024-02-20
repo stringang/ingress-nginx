@@ -50,21 +50,21 @@ TARGETS_DIR="rootfs/bin/${ARCH}"
 echo "Building targets for ${ARCH}, generated targets in ${TARGETS_DIR} directory."
 
 go build \
-  -trimpath -ldflags="-buildid= -w -s \
+  -trimpath -gcflags="all=-N -l" -buildvcs=false -ldflags="-buildid= -w -s \
     -X ${PKG}/version.RELEASE=${TAG} \
     -X ${PKG}/version.COMMIT=${COMMIT_SHA} \
     -X ${PKG}/version.REPO=${REPO_INFO}" \
   -o "${TARGETS_DIR}/nginx-ingress-controller" "${PKG}/cmd/nginx"
 
 go build \
-  -trimpath -ldflags="-buildid= -w -s \
+  -trimpath -gcflags="all=-N -l" -buildvcs=false -ldflags="-buildid= -w -s \
     -X ${PKG}/version.RELEASE=${TAG} \
     -X ${PKG}/version.COMMIT=${COMMIT_SHA} \
     -X ${PKG}/version.REPO=${REPO_INFO}" \
   -o "${TARGETS_DIR}/dbg" "${PKG}/cmd/dbg"
 
 go build \
-  -trimpath -ldflags="-buildid= -w -s \
+  -trimpath -gcflags="all=-N -l" -buildvcs=false -ldflags="-buildid= -w -s \
     -X ${PKG}/version.RELEASE=${TAG} \
     -X ${PKG}/version.COMMIT=${COMMIT_SHA} \
     -X ${PKG}/version.REPO=${REPO_INFO}" \

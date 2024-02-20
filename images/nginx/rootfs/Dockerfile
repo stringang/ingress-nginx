@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM alpine:3.14.6 as builder
+FROM golang:1.20.6-alpine3.18 as builder
 
 COPY . /
 
@@ -21,7 +21,7 @@ RUN apk update \
   && /build.sh
 
 # Use a multi-stage build
-FROM alpine:3.14.6
+FROM golang:1.20.6-alpine3.18
 
 ENV PATH=$PATH:/usr/local/luajit/bin:/usr/local/nginx/sbin:/usr/local/nginx/bin
 
@@ -71,7 +71,7 @@ RUN chmod +x /usr/local/entrypoint.sh \
   chown -R www-data.www-data ${dir}; \
   done'
 
-EXPOSE 80 443
+EXPOSE 80 443 2345
 
 ENTRYPOINT ["/usr/local/entrypoint.sh"]
 

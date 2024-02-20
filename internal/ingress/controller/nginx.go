@@ -70,17 +70,19 @@ const (
 
 // NewNGINXController creates a new NGINX Ingress controller.
 func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXController {
+	// 创建 event broadcaster
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{
 		Interface: config.Client.CoreV1().Events(config.Namespace),
 	})
-
+	// 获取 pod nameserver(读取 /etc/resolv.conf 文件)
 	h, err := dns.GetSystemNameServers()
 	if err != nil {
 		klog.Warningf("Error reading system nameservers: %v", err)
 	}
 
+	// 创建 nginx controller 对象
 	n := &NGINXController{
 		isIPV6Enabled: ing_net.IsIPv6Enabled(),
 
@@ -105,7 +107,7 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 
 		metricCollector: mc,
 
-		command: NewNginxCommand(),
+		command: NewNginxCommand(), // nginx cli 命令 /usr/bin/nginx
 	}
 
 	if n.cfg.ValidationWebhook != "" {
@@ -120,6 +122,8 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 		}
 	}
 
+	// object store 对象（所有 ingresses/services/secrets/ingress annotations）
+	// informer
 	n.store = store.New(
 		config.Namespace,
 		config.WatchNamespaceSelector,
@@ -134,6 +138,7 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 		config.DeepInspector,
 		config.IngressClassConfiguration)
 
+	// 创建 queue，插入 queue 中每个元素执行 syncIngress func
 	n.syncQueue = task.NewTaskQueue(n.syncIngress)
 
 	if config.UpdateStatus {
@@ -149,6 +154,7 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 		klog.Warning("Update of Ingress status is disabled (flag --update-status)")
 	}
 
+	// 默认模版文件变化的回调函数
 	onTemplateChange := func() {
 		template, err := ngx_template.NewTemplate(nginx.TemplatePath)
 		if err != nil {
@@ -162,6 +168,7 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 		n.syncQueue.EnqueueTask(task.GetDummyObject("template-change"))
 	}
 
+	// 使用默认模版 `/etc/nginx/template/nginx.tmpl` 创建 template 实例
 	ngxTpl, err := ngx_template.NewTemplate(nginx.TemplatePath)
 	if err != nil {
 		klog.Fatalf("Invalid NGINX configuration template: %v", err)
@@ -169,11 +176,13 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 
 	n.t = ngxTpl
 
+	// 监听默认模版 `/etc/nginx/template/nginx.tmpl` 文件的变化
 	_, err = watch.NewFileWatcher(nginx.TemplatePath, onTemplateChange)
 	if err != nil {
 		klog.Fatalf("Error creating file watcher for %v: %v", nginx.TemplatePath, err)
 	}
 
+	// 遍历 `/etc/nginx/geoip/` 目录，获取目录下所有的文件
 	filesToWatch := []string{}
 	err = filepath.Walk("/etc/nginx/geoip/", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -192,9 +201,11 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 		klog.Fatalf("Error creating file watchers: %v", err)
 	}
 
+	// 监听文件并处理
 	for _, f := range filesToWatch {
 		_, err = watch.NewFileWatcher(f, func() {
 			klog.InfoS("File changed detected. Reloading NGINX", "path", f)
+			// queue 执行
 			n.syncQueue.EnqueueTask(task.GetDummyObject("file-change"))
 		})
 		if err != nil {
@@ -207,7 +218,7 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 
 // NGINXController describes a NGINX Ingress controller.
 type NGINXController struct {
-	cfg *Configuration
+	cfg *Configuration // 配置信息
 
 	recorder record.EventRecorder
 
@@ -215,7 +226,7 @@ type NGINXController struct {
 
 	syncStatus status.Syncer
 
-	syncRateLimiter flowcontrol.RateLimiter
+	syncRateLimiter flowcontrol.RateLimiter // 限流器
 
 	// stopLock is used to enforce that only a single call to Stop send at
 	// a given time. We allow stopping through an HTTP endpoint and
@@ -229,17 +240,17 @@ type NGINXController struct {
 	ngxErrCh chan error
 
 	// runningConfig contains the running configuration in the Backend
-	runningConfig *ingress.Configuration
+	runningConfig *ingress.Configuration // 运行时配置
 
-	t ngx_template.Writer
+	t ngx_template.Writer // template 操作
 
-	resolver []net.IP
+	resolver []net.IP // dns nameserver
 
 	isIPV6Enabled bool
 
 	isShuttingDown bool
 
-	Proxy *TCPProxy
+	Proxy *TCPProxy // ssl passthrough 使用
 
 	store store.Storer
 
@@ -255,6 +266,7 @@ type NGINXController struct {
 func (n *NGINXController) Start() {
 	klog.InfoS("Starting NGINX Ingress controller")
 
+	// 启动 informer，监听 ingress/ingressclass/endpoint/secret/configmap/service 资源
 	n.store.Run(n.stopCh)
 
 	// we need to use the defined ingress class to allow multiple leaders
@@ -297,8 +309,10 @@ func (n *NGINXController) Start() {
 	}
 
 	klog.InfoS("Starting NGINX process")
+	// 启动 nginx 进程
 	n.start(cmd)
 
+	// 启动 queue goroutine 消费
 	go n.syncQueue.Run(time.Second, n.stopCh)
 	// force initial sync
 	n.syncQueue.EnqueueTask(task.GetDummyObject("initial-sync"))
@@ -323,6 +337,7 @@ func (n *NGINXController) Start() {
 		}()
 	}
 
+	// 从 updateCh 接收 informer event
 	for {
 		select {
 		case err := <-n.ngxErrCh:
@@ -336,6 +351,7 @@ func (n *NGINXController) Start() {
 				return
 			}
 
+		// 接收 informer event
 		case event := <-n.updateCh.Out():
 			if n.isShuttingDown {
 				break
@@ -343,12 +359,14 @@ func (n *NGINXController) Start() {
 
 			if evt, ok := event.(store.Event); ok {
 				klog.V(3).InfoS("Event received", "type", evt.Type, "object", evt.Obj)
+				// event 类型
 				if evt.Type == store.ConfigurationEvent {
 					// TODO: is this necessary? Consider removing this special case
 					n.syncQueue.EnqueueTask(task.GetDummyObject("configmap-change"))
 					continue
 				}
 
+				// 将 event 添加至 queue 处理
 				n.syncQueue.EnqueueSkippableTask(evt.Obj)
 			} else {
 				klog.Warningf("Unexpected event type received %T", event)
@@ -659,6 +677,7 @@ func (n *NGINXController) OnUpdate(ingressCfg ingress.Configuration) error {
 	cfg := n.store.GetBackendConfiguration()
 	cfg.Resolver = n.resolver
 
+	// 生成 nginx.conf
 	content, err := n.generateTemplate(cfg, ingressCfg)
 	if err != nil {
 		return err
@@ -669,6 +688,7 @@ func (n *NGINXController) OnUpdate(ingressCfg ingress.Configuration) error {
 		return err
 	}
 
+	// 测试验证 nginx.conf
 	err = n.testTemplate(content)
 	if err != nil {
 		return err
@@ -710,6 +730,7 @@ func (n *NGINXController) OnUpdate(ingressCfg ingress.Configuration) error {
 		return err
 	}
 
+	// 执行 nginx reload
 	o, err := n.command.ExecCommand("-s", "reload").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v\n%v", err, string(o))
