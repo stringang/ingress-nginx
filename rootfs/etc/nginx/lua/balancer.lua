@@ -109,6 +109,7 @@ local function sync_backend(backend)
     return
   end
 
+  -- 如果是 ExternalName service
   if is_backend_with_external_name(backend) then
     backend = resolve_external_names(backend)
   end
@@ -143,6 +144,7 @@ local function sync_backends_with_external_name()
   end
 end
 
+-- 同步 backends 数据
 local function sync_backends()
   local raw_backends_last_synced_at = configuration.get_raw_backends_last_synced_at()
   if raw_backends_last_synced_at <= backends_last_synced_at then
@@ -275,6 +277,8 @@ local function get_balancer()
     return ngx.ctx.balancer
   end
 
+  -- 获取 nginx.conf server 配置中的变量信息
+  -- ingress 对象 -> upstream
   local backend_name = ngx.var.proxy_upstream_name
 
   local balancer = balancers[backend_name]
@@ -294,6 +298,7 @@ local function get_balancer()
   return balancer
 end
 
+-- nginx worker 启动时初始化
 function _M.init_worker()
   -- when worker starts, sync non ExternalName backends without delay
   sync_backends()
@@ -305,6 +310,7 @@ function _M.init_worker()
     ngx.log(ngx.ERR, "failed to create timer: ", err)
   end
 
+  -- 每秒同步一次
   ok, err = ngx.timer.every(BACKENDS_SYNC_INTERVAL, sync_backends)
   if not ok then
     ngx.log(ngx.ERR, "error when setting up timer.every for sync_backends: ", err)
@@ -324,6 +330,7 @@ function _M.rewrite()
   end
 end
 
+-- nginx 请求转发实现
 function _M.balance()
   local balancer = get_balancer()
   if not balancer then
@@ -343,6 +350,8 @@ function _M.balance()
 
   ngx_balancer.set_more_tries(1)
 
+  -- https://github.com/openresty/lua-resty-core/blob/master/lib/ngx/balancer.md#set_current_peer
+  -- 代理转发请求
   local ok, err = ngx_balancer.set_current_peer(peer)
   if not ok then
     ngx.log(ngx.ERR, "error while setting current upstream peer ", peer,
